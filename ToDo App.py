@@ -1,5 +1,6 @@
 import sys
 import json
+import os
 from PyQt5.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
                              QCalendarWidget, QListWidget, QLineEdit,
                              QPushButton, QLabel, QListWidgetItem, 
@@ -7,6 +8,18 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
 from PyQt5.QtCore import QDate, Qt, QSize, QUrl
 from PyQt5.QtGui import QFont, QColor, QPainter
 from PyQt5.QtMultimedia import QSoundEffect
+import time
+import logging
+from pathlib import Path
+
+
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='todoapp.log',
+    filemode='w'
+)
 
 class CustomCalendar(QCalendarWidget):
     def paintCell(self, painter, rect, date):
@@ -22,6 +35,8 @@ class CustomCalendar(QCalendarWidget):
                 painter.drawText(rect, Qt.AlignRight | Qt.AlignTop, str(count))
                 painter.restore()
 
+
+
 class TodoApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -34,7 +49,20 @@ class TodoApp(QWidget):
 
     def setup_sound(self):
         self.sound = QSoundEffect()
-        self.sound.setSource(QUrl.fromLocalFile("ting.wav"))
+        try:
+            if getattr(sys, 'frozen', False):
+                # Packaged app - sound file is in Resources directory
+                base_path = Path(sys._MEIPASS)
+            else:
+                # Development path
+                base_path = Path(__file__).parent
+                
+            sound_path = base_path / "ting.wav"
+            logging.info(f"Sound path: {sound_path}")
+            self.sound.setSource(QUrl.fromLocalFile(str(sound_path)))
+        except Exception as e:
+            logging.error(f"Sound initialization failed: {str(e)}")
+
 
     def init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -157,7 +185,7 @@ class TodoApp(QWidget):
         
         main_layout.addLayout(right_layout)
 
-        self.setWindowTitle('Dhruvium Todo')
+        self.setWindowTitle('Dhruvium To-do App')
         self.setGeometry(300, 300, 1000, 600)
         self.show()
 
@@ -288,27 +316,60 @@ class TodoApp(QWidget):
             self.todos[self.current_date][index]["done"] = item.checkState() == Qt.Checked
             self.update_todo_list()
 
+    def get_data_path(self):
+        """Get correct data path for both development and packaged app"""
+        try:
+            if getattr(sys, 'frozen', False):
+                # For packaged app - use proper macOS application support directory
+                from AppKit import NSSearchPathForDirectoriesInDomains
+                app_support = NSSearchPathForDirectoriesInDomains(14, 1, True)[0]  # NSApplicationSupportDirectory
+                data_dir = Path(app_support) / "YourAppName"
+            else:
+                # Development path
+                data_dir = Path(__file__).parent / "data"
+    
+            # Create directory if it doesn't exist
+            data_dir.mkdir(parents=True, exist_ok=True)
+            return data_dir / "todos.json"
+            
+        except Exception as e:
+            logging.error(f"Path error: {str(e)}")
+            return Path.home() / "todos.json"  # Fallback to home directory
+
+
     def load_data(self):
         try:
-            with open('todos.json', 'r') as f:
-                data = json.load(f)
-                self.todos = data.get('todos', {})
-                self.long_term_tasks = data.get('long_term', [])
-        except FileNotFoundError:
-            self.todos = {}
-            self.long_term_tasks = []
+            data_file = self.get_data_path()
+            logging.info(f"Loading data from: {data_file}")
+            
+            if data_file.exists():
+                with open(data_file, 'r') as f:
+                    data = json.load(f)
+                    self.todos = data.get('todos', {})
+                    self.long_term_tasks = data.get('long_term', [])
+        except Exception as e:
+            logging.error(f"Load error: {str(e)}", exc_info=True)
 
     def save_data(self):
-        data = {
-            'todos': self.todos,
-            'long_term': self.long_term_tasks
-        }
-        with open('todos.json', 'w') as f:
-            json.dump(data, f)
+        try:
+            data_file = self.get_data_path()
+            logging.info(f"Saving data to: {data_file}")
+            
+            data = {
+                'todos': self.todos,
+                'long_term': self.long_term_tasks
+            }
+            with open(data_file, 'w') as f:
+                json.dump(data, f)
+        except Exception as e:
+            logging.error(f"Save error: {str(e)}", exc_info=True)
 
     def closeEvent(self, event):
+        logging.debug("Closing application")
         self.save_data()
+        QApplication.processEvents()
         event.accept()
+        
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
